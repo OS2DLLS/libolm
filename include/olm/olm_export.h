@@ -9,20 +9,20 @@
 #  ifndef OLM_EXPORT
 #    ifdef olm_EXPORTS
         /* We are building this library */
-#      define OLM_EXPORT __attribute__((visibility("default")))
+#      define OLM_EXPORT 
 #    else
         /* We are using this library */
-#      define OLM_EXPORT __attribute__((visibility("default")))
+#      define OLM_EXPORT 
 #    endif
 #  endif
 
 #  ifndef OLM_NO_EXPORT
-#    define OLM_NO_EXPORT __attribute__((visibility("hidden")))
+#    define OLM_NO_EXPORT 
 #  endif
 #endif
 
 #ifndef OLM_DEPRECATED
-#  define OLM_DEPRECATED __attribute__ ((__deprecated__))
+#  define OLM_DEPRECATED 
 #endif
 
 #ifndef OLM_DEPRECATED_EXPORT
@@ -33,6 +33,7 @@
 #  define OLM_DEPRECATED_NO_EXPORT OLM_NO_EXPORT OLM_DEPRECATED
 #endif
 
+/* NOLINTNEXTLINE(readability-avoid-unconditional-preprocessor-if) */
 #if 0 /* DEFINE_NO_DEPRECATED */
 #  ifndef OLM_NO_DEPRECATED
 #    define OLM_NO_DEPRECATED
