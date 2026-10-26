@@ -86,6 +86,12 @@ size_t olm_pk_encryption_set_recipient_key (
         (uint8_t *)encryption->recipient_key.public_key
     );
 
+    if (!_olm_crypto_curve25519_public_key_is_valid(&encryption->recipient_key)) {
+        encryption->last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+        olm::unset(encryption->recipient_key);
+        return std::size_t(-1);
+    }
+
     return 0;
 }
 
@@ -136,14 +142,17 @@ size_t olm_pk_encrypt(
 
     _olm_curve25519_key_pair ephemeral_keypair;
     _olm_crypto_curve25519_generate_key((const uint8_t *) random, &ephemeral_keypair);
+    olm::SharedKey secret;
+    if (!_olm_crypto_curve25519_shared_secret(&ephemeral_keypair, &encryption->recipient_key, secret)) {
+        encryption->last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+        olm::unset(ephemeral_keypair);
+        return std::size_t(-1);
+    }
     olm::encode_base64(
         (const uint8_t *)ephemeral_keypair.public_key.public_key,
         CURVE25519_KEY_LENGTH,
         (uint8_t *)ephemeral_key
     );
-
-    olm::SharedKey secret;
-    _olm_crypto_curve25519_shared_secret(&ephemeral_keypair, &encryption->recipient_key, secret);
     size_t raw_ciphertext_length =
         _olm_cipher_aes_sha_256_ops.encrypt_ciphertext_length(olm_pk_cipher, plaintext_length);
     uint8_t *ciphertext_pos = (uint8_t *) ciphertext + ciphertext_length - raw_ciphertext_length;
@@ -403,7 +412,10 @@ size_t olm_pk_decrypt(
     );
 
     olm::SharedKey secret;
-    _olm_crypto_curve25519_shared_secret(&decryption->key_pair, &ephemeral, secret);
+    if (!_olm_crypto_curve25519_shared_secret(&decryption->key_pair, &ephemeral, secret)) {
+        decryption->last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+        return std::size_t(-1);
+    }
 
     uint8_t raw_mac[MAC_LENGTH];
     olm::decode_base64(

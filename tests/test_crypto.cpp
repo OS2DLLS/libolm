@@ -139,6 +139,23 @@ CHECK_EQ_SIZE(input, actual, length);
 } /* AES Test Case 1 */
 
 
+TEST_CASE("AES CBC decryption rejects incomplete blocks") {
+    _olm_aes256_key key = {};
+    _olm_aes256_iv iv = {};
+    std::uint8_t input[1] = {};
+    std::uint8_t output[16] = {};
+
+    CHECK_EQ(
+        std::size_t(-1),
+        _olm_crypto_aes_decrypt_cbc(&key, &iv, input, 0, output)
+    );
+    CHECK_EQ(
+        std::size_t(-1),
+        _olm_crypto_aes_decrypt_cbc(&key, &iv, input, sizeof(input), output)
+    );
+}
+
+
 /* SHA 256 Test Case 1 */
 
 TEST_CASE("SHA 256 Test Case 1") {

@@ -163,11 +163,17 @@ OLM_EXPORT void _olm_crypto_curve25519_generate_key(
 
 /** Create a shared secret using our private key and their public key.
  * The output buffer must be at least CURVE25519_SHARED_SECRET_LENGTH (32) bytes long.
+ * Returns non-zero on success. An all-zero shared secret is rejected and cleared.
  */
-OLM_EXPORT void _olm_crypto_curve25519_shared_secret(
+OLM_EXPORT int _olm_crypto_curve25519_shared_secret(
     const struct _olm_curve25519_key_pair *our_key,
     const struct _olm_curve25519_public_key *their_key,
     uint8_t * output
+);
+
+/** Return non-zero if the public key produces a non-zero X25519 result. */
+OLM_EXPORT int _olm_crypto_curve25519_public_key_is_valid(
+    const struct _olm_curve25519_public_key *their_key
 );
 
 /** Generate an ed25519 key pair

@@ -116,12 +116,39 @@ void _olm_crypto_curve25519_generate_key(
 }
 
 
-void _olm_crypto_curve25519_shared_secret(
+int _olm_crypto_curve25519_shared_secret(
     const struct _olm_curve25519_key_pair *our_key,
     const struct _olm_curve25519_public_key * their_key,
     std::uint8_t * output
 ) {
     ::curve25519_donna(output, our_key->private_key.private_key, their_key->public_key);
+    std::uint8_t nonzero = 0;
+    for (std::size_t i = 0; i < CURVE25519_SHARED_SECRET_LENGTH; ++i) {
+        nonzero |= output[i];
+    }
+    if (nonzero == 0) {
+        olm::unset(output, CURVE25519_SHARED_SECRET_LENGTH);
+        return 0;
+    }
+    return 1;
+}
+
+
+int _olm_crypto_curve25519_public_key_is_valid(
+    const struct _olm_curve25519_public_key *their_key
+) {
+    std::uint8_t validation_private_key[CURVE25519_KEY_LENGTH] = { 8 };
+    std::uint8_t shared_secret[CURVE25519_SHARED_SECRET_LENGTH];
+    ::curve25519_donna(
+        shared_secret, validation_private_key, their_key->public_key
+    );
+    std::uint8_t nonzero = 0;
+    for (std::size_t i = 0; i < CURVE25519_SHARED_SECRET_LENGTH; ++i) {
+        nonzero |= shared_secret[i];
+    }
+    olm::unset(validation_private_key);
+    olm::unset(shared_secret);
+    return nonzero != 0;
 }
 
 
@@ -207,6 +234,10 @@ std::size_t _olm_crypto_aes_decrypt_cbc(
     std::uint8_t const * input, std::size_t input_length,
     std::uint8_t * output
 ) {
+    if (input_length == 0 || input_length % AES_BLOCK_LENGTH != 0) {
+        return std::size_t(-1);
+    }
+
     std::uint32_t key_schedule[AES_KEY_SCHEDULE_LENGTH];
     ::aes_key_setup(key->key, key_schedule, AES_KEY_BITS);
     std::uint8_t block1[AES_BLOCK_LENGTH];

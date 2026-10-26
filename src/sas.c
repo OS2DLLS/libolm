@@ -108,7 +108,11 @@ size_t olm_sas_set_their_key(
         return (size_t)-1;
     }
 
-    _olm_crypto_curve25519_shared_secret(&sas->curve25519_key, their_key, sas->secret);
+    sas->their_key_set = 0;
+    if (!_olm_crypto_curve25519_shared_secret(&sas->curve25519_key, their_key, sas->secret)) {
+        sas->last_error = OLM_BAD_MESSAGE_FORMAT;
+        return (size_t)-1;
+    }
     sas->their_key_set = 1;
     return 0;
 }

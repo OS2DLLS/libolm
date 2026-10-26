@@ -1,4 +1,5 @@
 #include "olm/crypto.h"
+#include "olm/base64.hh"
 #include "olm/olm.h"
 #include "olm/pk.h"
 
@@ -6,10 +7,123 @@
 #include "utils.hh"
 
 #include <iostream>
+#include <cstring>
 #include <vector>
+
+TEST_CASE("Public-key decrypt rejects authenticated empty ciphertext") {
+    std::vector<std::uint8_t> decryption_buffer(olm_pk_decryption_size());
+    OlmPkDecryption *decryption = olm_pk_decryption(decryption_buffer.data());
+    std::vector<std::uint8_t> encryption_buffer(olm_pk_encryption_size());
+    OlmPkEncryption *encryption = olm_pk_encryption(encryption_buffer.data());
+
+    std::uint8_t recipient_private[CURVE25519_KEY_LENGTH] = {};
+    recipient_private[0] = 7;
+    _olm_curve25519_key_pair recipient_keypair;
+    _olm_crypto_curve25519_generate_key(recipient_private, &recipient_keypair);
+
+    std::uint8_t ephemeral_private[CURVE25519_KEY_LENGTH] = {};
+    ephemeral_private[0] = 11;
+    _olm_curve25519_key_pair ephemeral_keypair;
+    _olm_crypto_curve25519_generate_key(ephemeral_private, &ephemeral_keypair);
+
+    std::vector<std::uint8_t> public_key(olm_pk_key_length());
+    CHECK_NE(
+        std::size_t(-1),
+        olm_pk_key_from_private(
+            decryption, public_key.data(), public_key.size(),
+            recipient_private, sizeof(recipient_private)
+        )
+    );
+
+    std::uint8_t shared_secret[CURVE25519_SHARED_SECRET_LENGTH];
+    _olm_crypto_curve25519_shared_secret(
+        &ephemeral_keypair, &recipient_keypair.public_key, shared_secret
+    );
+    std::uint8_t derived_keys[AES256_KEY_LENGTH + 32 + AES256_IV_LENGTH];
+    _olm_crypto_hkdf_sha256(
+        shared_secret, sizeof(shared_secret), nullptr, 0, nullptr, 0,
+        derived_keys, sizeof(derived_keys)
+    );
+    std::uint8_t empty_input = 0;
+    std::uint8_t full_mac[SHA256_OUTPUT_LENGTH];
+    _olm_crypto_hmac_sha256(
+        derived_keys + AES256_KEY_LENGTH, 32,
+        &empty_input, 0, full_mac
+    );
+
+    std::vector<std::uint8_t> ephemeral_key(olm_pk_key_length());
+    olm::encode_base64(
+        ephemeral_keypair.public_key.public_key, CURVE25519_KEY_LENGTH,
+        ephemeral_key.data()
+    );
+    std::vector<std::uint8_t> mac(olm_pk_mac_length(encryption));
+    olm::encode_base64(full_mac, 8, mac.data());
+
+    std::uint8_t empty_ciphertext = 0;
+    std::uint8_t plaintext = 0;
+    CHECK_EQ(
+        olm_error(),
+        olm_pk_decrypt(
+            decryption,
+            ephemeral_key.data(), ephemeral_key.size(),
+            mac.data(), mac.size(),
+            &empty_ciphertext, 0,
+            &plaintext, 0
+        )
+    );
+}
 
 
 /* Encryption Test Case 1 */
+
+TEST_CASE("Public-key decryption rejects an all-zero ephemeral key") {
+    std::vector<std::uint8_t> decryption_buffer(olm_pk_decryption_size());
+    OlmPkDecryption *decryption = olm_pk_decryption(decryption_buffer.data());
+    std::uint8_t private_key[CURVE25519_KEY_LENGTH] = {};
+    private_key[0] = 1;
+    std::vector<std::uint8_t> public_key(olm::encode_base64_length(CURVE25519_KEY_LENGTH));
+    CHECK_NE(
+        olm_error(),
+        olm_pk_key_from_private(decryption, public_key.data(), public_key.size(), private_key, sizeof(private_key))
+    );
+
+    std::vector<std::uint8_t> ephemeral_key(olm::encode_base64_length(CURVE25519_KEY_LENGTH), 'A');
+    std::vector<std::uint8_t> mac(olm::encode_base64_length(8), 'A');
+    std::vector<std::uint8_t> ciphertext(olm::encode_base64_length(16), 'A');
+    std::uint8_t plaintext[32];
+
+    CHECK_EQ(
+        olm_error(),
+        olm_pk_decrypt(
+            decryption, ephemeral_key.data(), ephemeral_key.size(),
+            mac.data(), mac.size(), ciphertext.data(), ciphertext.size(),
+            plaintext, sizeof(plaintext)
+        )
+    );
+    CHECK_EQ(OLM_BAD_MESSAGE_FORMAT, olm_pk_decryption_last_error_code(decryption));
+}
+
+
+TEST_CASE("Public-key encryption rejects an all-zero recipient key") {
+    std::vector<std::uint8_t> encryption_buffer(olm_pk_encryption_size());
+    OlmPkEncryption *encryption = olm_pk_encryption(encryption_buffer.data());
+    std::uint8_t zero_key[44] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    CHECK_EQ(
+        olm_error(),
+        olm_pk_encryption_set_recipient_key(encryption, zero_key, sizeof(zero_key) - 1)
+    );
+    CHECK_EQ(OLM_BAD_MESSAGE_FORMAT, olm_pk_encryption_last_error_code(encryption));
+
+    std::uint8_t low_order_raw[CURVE25519_KEY_LENGTH] = { 1 };
+    std::vector<std::uint8_t> low_order_key(olm_pk_key_length());
+    olm::encode_base64(low_order_raw, sizeof(low_order_raw), low_order_key.data());
+    CHECK_EQ(
+        olm_error(),
+        olm_pk_encryption_set_recipient_key(encryption, low_order_key.data(), low_order_key.size())
+    );
+    CHECK_EQ(OLM_BAD_MESSAGE_FORMAT, olm_pk_encryption_last_error_code(encryption));
+}
 
 TEST_CASE("Public Key Encryption/Decryption Test Case 1") {
 

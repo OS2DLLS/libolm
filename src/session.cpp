@@ -21,6 +21,7 @@
 #include "olm/pickle.hh"
 
 #include <cstring>
+#include <limits>
 #include <stdio.h>
 
 namespace {
@@ -75,21 +76,38 @@ std::size_t olm::Session::new_outbound_session(
         local_account.identity_keys.curve25519_key
     );
 
-    received_message = false;
-    alice_identity_key = alice_identity_key_pair.public_key;
-    alice_base_key = base_key.public_key;
-    bob_one_time_key = one_time_key;
-
     // Calculate the shared secret S via triple DH
     std::uint8_t secret[3 * CURVE25519_SHARED_SECRET_LENGTH];
     std::uint8_t * pos = secret;
 
-    _olm_crypto_curve25519_shared_secret(&alice_identity_key_pair, &one_time_key, pos);
+    if (!_olm_crypto_curve25519_shared_secret(&alice_identity_key_pair, &one_time_key, pos)) {
+        last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+        olm::unset(secret);
+        olm::unset(base_key);
+        olm::unset(ratchet_key);
+        return std::size_t(-1);
+    }
     pos += CURVE25519_SHARED_SECRET_LENGTH;
-    _olm_crypto_curve25519_shared_secret(&base_key, &identity_key, pos);
+    if (!_olm_crypto_curve25519_shared_secret(&base_key, &identity_key, pos)) {
+        last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+        olm::unset(secret);
+        olm::unset(base_key);
+        olm::unset(ratchet_key);
+        return std::size_t(-1);
+    }
     pos += CURVE25519_SHARED_SECRET_LENGTH;
-    _olm_crypto_curve25519_shared_secret(&base_key, &one_time_key, pos);
+    if (!_olm_crypto_curve25519_shared_secret(&base_key, &one_time_key, pos)) {
+        last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+        olm::unset(secret);
+        olm::unset(base_key);
+        olm::unset(ratchet_key);
+        return std::size_t(-1);
+    }
 
+    received_message = false;
+    alice_identity_key = alice_identity_key_pair.public_key;
+    alice_base_key = base_key.public_key;
+    bob_one_time_key = one_time_key;
     ratchet.initialise_as_alice(secret, sizeof(secret), ratchet_key);
 
     olm::unset(base_key);
@@ -143,9 +161,12 @@ std::size_t olm::Session::new_inbound_session(
         }
     }
 
-    olm::load_array(alice_identity_key.public_key, reader.identity_key);
-    olm::load_array(alice_base_key.public_key, reader.base_key);
-    olm::load_array(bob_one_time_key.public_key, reader.one_time_key);
+    _olm_curve25519_public_key incoming_identity_key;
+    _olm_curve25519_public_key incoming_base_key;
+    _olm_curve25519_public_key incoming_one_time_key;
+    olm::load_array(incoming_identity_key.public_key, reader.identity_key);
+    olm::load_array(incoming_base_key.public_key, reader.base_key);
+    olm::load_array(incoming_one_time_key.public_key, reader.one_time_key);
 
     olm::MessageReader message_reader;
     decode_message(
@@ -161,9 +182,13 @@ std::size_t olm::Session::new_inbound_session(
 
     _olm_curve25519_public_key ratchet_key;
     olm::load_array(ratchet_key.public_key, message_reader.ratchet_key);
+    if (!_olm_crypto_curve25519_public_key_is_valid(&ratchet_key)) {
+        last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+        return std::size_t(-1);
+    }
 
     olm::OneTimeKey const * our_one_time_key = local_account.lookup_key(
-        bob_one_time_key
+        incoming_one_time_key
     );
 
     if (!our_one_time_key) {
@@ -179,12 +204,27 @@ std::size_t olm::Session::new_inbound_session(
     // Calculate the shared secret S via triple DH
     std::uint8_t secret[CURVE25519_SHARED_SECRET_LENGTH * 3];
     std::uint8_t * pos = secret;
-    _olm_crypto_curve25519_shared_secret(&bob_one_time_key, &alice_identity_key, pos);
+    if (!_olm_crypto_curve25519_shared_secret(&bob_one_time_key, &incoming_identity_key, pos)) {
+        last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+        olm::unset(secret);
+        return std::size_t(-1);
+    }
     pos += CURVE25519_SHARED_SECRET_LENGTH;
-    _olm_crypto_curve25519_shared_secret(&bob_identity_key, &alice_base_key, pos);
+    if (!_olm_crypto_curve25519_shared_secret(&bob_identity_key, &incoming_base_key, pos)) {
+        last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+        olm::unset(secret);
+        return std::size_t(-1);
+    }
     pos += CURVE25519_SHARED_SECRET_LENGTH;
-    _olm_crypto_curve25519_shared_secret(&bob_one_time_key, &alice_base_key, pos);
+    if (!_olm_crypto_curve25519_shared_secret(&bob_one_time_key, &incoming_base_key, pos)) {
+        last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+        olm::unset(secret);
+        return std::size_t(-1);
+    }
 
+    this->alice_identity_key = incoming_identity_key;
+    this->alice_base_key = incoming_base_key;
+    this->bob_one_time_key = incoming_one_time_key;
     ratchet.initialise_as_bob(secret, sizeof(secret), ratchet_key);
 
     olm::unset(secret);
@@ -408,12 +448,13 @@ void elide_description(char *end) {
 }
 
 void olm::Session::describe(char *describe_buffer, size_t buflen) {
+    if (buflen == 0 ||
+        buflen > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return;
+    }
     // how much of the buffer is remaining (this is an int rather than a size_t
     // because it will get compared to the return value from snprintf)
-    int remaining = buflen;
-    // do nothing if we have a zero-length buffer, or if buflen > INT_MAX,
-    // resulting in an overflow
-    if (remaining <= 0) return;
+    int remaining = static_cast<int>(buflen);
 
     describe_buffer[0] = '\0';
     // we need at least 23 characters to get any sort of meaningful

@@ -3,6 +3,8 @@
 
 #include "testing.hh"
 
+#include <limits>
+
 /* decode into a buffer, which is returned */
 const std::uint8_t *decode_hex(
     const char * input
@@ -132,4 +134,21 @@ TEST_CASE("V2 session pickle") {
     );
 
     check_session(session);
+}
+
+TEST_CASE("Session describe ignores lengths larger than INT_MAX") {
+    olm::Session session;
+    session.ratchet.sender_chain.insert()->chain_key.index = 0;
+
+    if (std::numeric_limits<std::size_t>::max() >
+        std::numeric_limits<unsigned int>::max()) {
+        const std::size_t oversized_length =
+            static_cast<std::size_t>(std::numeric_limits<unsigned int>::max()) + 24;
+        char buffer[64];
+        for (char &character : buffer) character = 'x';
+
+        session.describe(buffer, oversized_length);
+
+        CHECK_EQ('x', buffer[0]);
+    }
 }

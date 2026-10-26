@@ -114,3 +114,15 @@ olm_sas_calculate_mac(bob_sas, (void *) "Hello world!", 12, "MAC", 3, bob_mac.da
 CHECK_EQ_SIZE(alice_mac.data(), bob_mac.data(), olm_sas_mac_length(alice_sas));
 
 }
+
+TEST_CASE("SAS rejects an all-zero peer key") {
+    std::vector<std::uint8_t> sas_buffer(olm_sas_size());
+    OlmSAS *sas = olm_sas(sas_buffer.data());
+    std::uint8_t private_key[32] = {};
+    CHECK(olm_create_sas(sas, private_key, sizeof(private_key)) == 0);
+
+    std::uint8_t zero_key[] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    CHECK(olm_sas_set_their_key(sas, zero_key, sizeof(zero_key) - 1) == static_cast<std::size_t>(-1));
+    CHECK_EQ(OLM_BAD_MESSAGE_FORMAT, olm_sas_last_error_code(sas));
+    CHECK_EQ(0, olm_sas_is_their_key_set(sas));
+}

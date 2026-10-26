@@ -1,4 +1,6 @@
 #include "olm/olm.h"
+#include "olm/base64.hh"
+#include "olm/message.hh"
 
 #include "testing.hh"
 #include "utils.hh"
@@ -175,6 +177,33 @@ CHECK_EQ(std::size_t(-1),
 CHECK_EQ(OLM_PICKLE_EXTRA_DATA, olm_session_last_error_code(session));
 }
 
+TEST_CASE("Outbound session rejects an all-zero peer key") {
+    MockRandom mock_random('Z');
+    std::vector<std::uint8_t> account_buffer(::olm_account_size());
+    ::OlmAccount *account = ::olm_account(account_buffer.data());
+    std::vector<std::uint8_t> account_random(::olm_create_account_random_length(account));
+    mock_random(account_random.data(), account_random.size());
+    CHECK_NE(std::size_t(-1), ::olm_create_account(account, account_random.data(), account_random.size()));
+
+    std::vector<std::uint8_t> session_buffer(::olm_session_size());
+    ::OlmSession *session = ::olm_session(session_buffer.data());
+    std::vector<std::uint8_t> session_random(::olm_create_outbound_session_random_length(session));
+    mock_random(session_random.data(), session_random.size());
+    std::uint8_t zero_key[] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    CHECK_EQ(
+        olm_error(),
+        ::olm_create_outbound_session(
+            session, account,
+            zero_key, sizeof(zero_key) - 1,
+            zero_key, sizeof(zero_key) - 1,
+            session_random.data(), session_random.size()
+        )
+    );
+    CHECK_EQ(OLM_BAD_MESSAGE_FORMAT, ::olm_session_last_error_code(session));
+}
+
+
 /** Loopback test */
 
 TEST_CASE("Loopback test") {
@@ -229,6 +258,69 @@ CHECK_NE(std::size_t(-1), ::olm_encrypt(
     message_1.data(), message_1.size()
 ));
 
+std::size_t malformed_raw_length = olm::decode_base64_length(message_1.size());
+std::vector<std::uint8_t> malformed_raw(malformed_raw_length);
+CHECK_EQ(
+    malformed_raw_length,
+    olm::decode_base64(message_1.data(), message_1.size(), malformed_raw.data())
+);
+olm::PreKeyMessageReader malformed_reader;
+olm::decode_one_time_key_message(
+    malformed_reader, malformed_raw.data(), malformed_raw_length
+);
+CHECK_EQ(std::size_t(32), malformed_reader.identity_key_length);
+std::memset(
+    const_cast<std::uint8_t *>(malformed_reader.identity_key),
+    0,
+    malformed_reader.identity_key_length
+);
+std::vector<std::uint8_t> malformed_message(olm::encode_base64_length(malformed_raw_length));
+olm::encode_base64(malformed_raw.data(), malformed_raw_length, malformed_message.data());
+std::vector<std::uint8_t> malformed_session_buffer(::olm_session_size());
+::OlmSession *malformed_session = ::olm_session(malformed_session_buffer.data());
+CHECK_EQ(
+    olm_error(),
+    ::olm_create_inbound_session(
+        malformed_session, b_account, malformed_message.data(), malformed_message.size()
+    )
+);
+CHECK_EQ(OLM_BAD_MESSAGE_FORMAT, ::olm_session_last_error_code(malformed_session));
+
+std::size_t ratchet_raw_length = olm::decode_base64_length(message_1.size());
+std::vector<std::uint8_t> ratchet_raw(ratchet_raw_length);
+CHECK_EQ(
+    ratchet_raw_length,
+    olm::decode_base64(message_1.data(), message_1.size(), ratchet_raw.data())
+);
+olm::PreKeyMessageReader ratchet_prekey_reader;
+olm::decode_one_time_key_message(
+    ratchet_prekey_reader, ratchet_raw.data(), ratchet_raw_length
+);
+olm::MessageReader ratchet_message_reader;
+olm::decode_message(
+    ratchet_message_reader,
+    ratchet_prekey_reader.message,
+    ratchet_prekey_reader.message_length,
+    8
+);
+CHECK_EQ(std::size_t(32), ratchet_message_reader.ratchet_key_length);
+std::memset(
+    const_cast<std::uint8_t *>(ratchet_message_reader.ratchet_key),
+    0,
+    ratchet_message_reader.ratchet_key_length
+);
+std::vector<std::uint8_t> low_order_ratchet_message(olm::encode_base64_length(ratchet_raw_length));
+olm::encode_base64(ratchet_raw.data(), ratchet_raw_length, low_order_ratchet_message.data());
+std::vector<std::uint8_t> low_order_ratchet_session_buffer(::olm_session_size());
+::OlmSession *low_order_ratchet_session = ::olm_session(low_order_ratchet_session_buffer.data());
+CHECK_EQ(
+    olm_error(),
+    ::olm_create_inbound_session(
+        low_order_ratchet_session, b_account,
+        low_order_ratchet_message.data(), low_order_ratchet_message.size()
+    )
+);
+CHECK_EQ(OLM_BAD_MESSAGE_FORMAT, ::olm_session_last_error_code(low_order_ratchet_session));
 
 std::vector<std::uint8_t> tmp_message_1(message_1);
 std::vector<std::uint8_t> b_session_buffer(::olm_session_size());

@@ -39,7 +39,7 @@ static const std::size_t MAX_MESSAGE_GAP = 2000;
  * @param new_chain_key[out]  returns the first chain key in the new chain
  *                            C(n,0)
  */
-static void create_chain_key(
+static bool create_chain_key(
     olm::SharedKey const & root_key,
     _olm_curve25519_key_pair const & our_key,
     _olm_curve25519_public_key const & their_key,
@@ -48,7 +48,10 @@ static void create_chain_key(
     olm::ChainKey & new_chain_key
 ) {
     olm::SharedKey secret;
-    _olm_crypto_curve25519_shared_secret(&our_key, &their_key, secret);
+    if (!_olm_crypto_curve25519_shared_secret(&our_key, &their_key, secret)) {
+        olm::unset(secret);
+        return false;
+    }
     std::uint8_t derived_secrets[2 * olm::OLM_SHARED_KEY_LENGTH];
     _olm_crypto_hkdf_sha256(
         secret, sizeof(secret),
@@ -62,6 +65,7 @@ static void create_chain_key(
     new_chain_key.index = 0;
     olm::unset(derived_secrets);
     olm::unset(secret);
+    return true;
 }
 
 
@@ -161,11 +165,15 @@ static std::size_t verify_mac_and_decrypt_for_new_chain(
     }
     olm::load_array(new_chain.ratchet_key.public_key, reader.ratchet_key);
 
-    create_chain_key(
+    if (!create_chain_key(
         session.root_key, session.sender_chain[0].ratchet_key,
         new_chain.ratchet_key, session.kdf_info,
         new_root_key, new_chain.chain_key
-    );
+    )) {
+        olm::unset(new_root_key);
+        olm::unset(new_chain);
+        return std::size_t(-1);
+    }
     std::size_t result = verify_mac_and_decrypt_for_existing_chain(
         session, new_chain.chain_key, reader,
         plaintext, max_plaintext_length
@@ -438,13 +446,18 @@ std::size_t olm::Ratchet::encrypt(
     if (sender_chain.empty()) {
         sender_chain.insert();
         _olm_crypto_curve25519_generate_key(random, &sender_chain[0].ratchet_key);
-        create_chain_key(
+        if (!create_chain_key(
             root_key,
             sender_chain[0].ratchet_key,
             receiver_chains[0].ratchet_key,
             kdf_info,
             root_key, sender_chain[0].chain_key
-        );
+        )) {
+            last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+            olm::unset(sender_chain[0]);
+            sender_chain.erase(sender_chain.begin());
+            return std::size_t(-1);
+        }
     }
 
     MessageKey keys;
@@ -603,10 +616,15 @@ std::size_t olm::Ratchet::decrypt(
 
         // TODO: we've already done this once, in
         // verify_mac_and_decrypt_for_new_chain(). we could reuse the result.
-        create_chain_key(
+        if (!create_chain_key(
             root_key, sender_chain[0].ratchet_key, chain->ratchet_key,
             kdf_info, root_key, chain->chain_key
-        );
+        )) {
+            last_error = OlmErrorCode::OLM_BAD_MESSAGE_FORMAT;
+            olm::unset(*chain);
+            receiver_chains.erase(chain);
+            return std::size_t(-1);
+        }
 
         olm::unset(sender_chain[0]);
         sender_chain.erase(sender_chain.begin());

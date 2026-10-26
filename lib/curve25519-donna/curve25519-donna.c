@@ -208,32 +208,32 @@ static void freduce_degree(limb *output) {
    *
    * For output[0..8], the absolute entry value is < 14*2^54 and we add, at
    * most, 19*14*2^54 thus, on exit, |output[0..8]| < 280*2^54. */
-  output[8] += output[18] << 4;
-  output[8] += output[18] << 1;
+  output[8] += output[18] * 16;
+  output[8] += output[18] * 2;
   output[8] += output[18];
-  output[7] += output[17] << 4;
-  output[7] += output[17] << 1;
+  output[7] += output[17] * 16;
+  output[7] += output[17] * 2;
   output[7] += output[17];
-  output[6] += output[16] << 4;
-  output[6] += output[16] << 1;
+  output[6] += output[16] * 16;
+  output[6] += output[16] * 2;
   output[6] += output[16];
-  output[5] += output[15] << 4;
-  output[5] += output[15] << 1;
+  output[5] += output[15] * 16;
+  output[5] += output[15] * 2;
   output[5] += output[15];
-  output[4] += output[14] << 4;
-  output[4] += output[14] << 1;
+  output[4] += output[14] * 16;
+  output[4] += output[14] * 2;
   output[4] += output[14];
-  output[3] += output[13] << 4;
-  output[3] += output[13] << 1;
+  output[3] += output[13] * 16;
+  output[3] += output[13] * 2;
   output[3] += output[13];
-  output[2] += output[12] << 4;
-  output[2] += output[12] << 1;
+  output[2] += output[12] * 16;
+  output[2] += output[12] * 2;
   output[2] += output[12];
-  output[1] += output[11] << 4;
-  output[1] += output[11] << 1;
+  output[1] += output[11] * 16;
+  output[1] += output[11] * 2;
   output[1] += output[11];
-  output[0] += output[10] << 4;
-  output[0] += output[10] << 1;
+  output[0] += output[10] * 16;
+  output[0] += output[10] * 2;
   output[0] += output[10];
 }
 
@@ -287,7 +287,7 @@ static void freduce_coefficients(limb *output) {
      * most, 280*2^28 in the first iteration of this loop. This is added to the
      * next limb and we can approximate the resulting bound of that limb by
      * 281*2^54. */
-    output[i] -= over << 26;
+    output[i] -= over * ((limb) 1 << 26);
     output[i+1] += over;
 
     /* For the first iteration, |output[i+1]| < 281*2^54, thus |over| <
@@ -297,12 +297,12 @@ static void freduce_coefficients(limb *output) {
      * For subsequent iterations of the loop, 281*2^54 remains a conservative
      * bound and no overflow occurs. */
     over = div_by_2_25(output[i+1]);
-    output[i+1] -= over << 25;
+    output[i+1] -= over * ((limb) 1 << 25);
     output[i+2] += over;
   }
   /* Now |output[10]| < 281*2^29 and all other coefficients are reduced. */
-  output[0] += output[10] << 4;
-  output[0] += output[10] << 1;
+  output[0] += output[10] * 16;
+  output[0] += output[10] * 2;
   output[0] += output[10];
 
   output[10] = 0;
@@ -311,7 +311,7 @@ static void freduce_coefficients(limb *output) {
    * So |over| will be no more than 2^16. */
   {
     limb over = div_by_2_26(output[0]);
-    output[0] -= over << 26;
+    output[0] -= over * ((limb) 1 << 26);
     output[1] += over;
   }
 
@@ -447,13 +447,13 @@ fexpand(limb *output, const u8 *input) {
 
 /* s32_eq returns 0xffffffff iff a == b and zero otherwise. */
 static s32 s32_eq(s32 a, s32 b) {
-  a = ~(a ^ b);
-  a &= a << 16;
-  a &= a << 8;
-  a &= a << 4;
-  a &= a << 2;
-  a &= a << 1;
-  return a >> 31;
+  uint32_t result = ~((uint32_t) a ^ (uint32_t) b);
+  result &= result << 16;
+  result &= result << 8;
+  result &= result << 4;
+  result &= result << 2;
+  result &= result << 1;
+  return -(s32) (result >> 31);
 }
 
 /* s32_gte returns 0xffffffff if a >= b and zero otherwise, where a and b are
@@ -473,6 +473,7 @@ fcontract(u8 *output, limb *input_limbs) {
   int i;
   int j;
   s32 input[10];
+  uint32_t packed[10];
   s32 mask;
 
   /* |input_limbs[i]| < 2^26, so it's valid to convert to an s32. */
@@ -583,19 +584,21 @@ fcontract(u8 *output, limb *input_limbs) {
     }
   }
 
-  input[1] <<= 2;
-  input[2] <<= 3;
-  input[3] <<= 5;
-  input[4] <<= 6;
-  input[6] <<= 1;
-  input[7] <<= 3;
-  input[8] <<= 4;
-  input[9] <<= 6;
+  packed[0] = (uint32_t) input[0];
+  packed[1] = (uint32_t) input[1] << 2;
+  packed[2] = (uint32_t) input[2] << 3;
+  packed[3] = (uint32_t) input[3] << 5;
+  packed[4] = (uint32_t) input[4] << 6;
+  packed[5] = (uint32_t) input[5];
+  packed[6] = (uint32_t) input[6] << 1;
+  packed[7] = (uint32_t) input[7] << 3;
+  packed[8] = (uint32_t) input[8] << 4;
+  packed[9] = (uint32_t) input[9] << 6;
 #define F(i, s) \
-  output[s+0] |=  input[i] & 0xff; \
-  output[s+1]  = (input[i] >> 8) & 0xff; \
-  output[s+2]  = (input[i] >> 16) & 0xff; \
-  output[s+3]  = (input[i] >> 24) & 0xff;
+  output[s+0] |=  packed[i] & 0xff; \
+  output[s+1]  = (packed[i] >> 8) & 0xff; \
+  output[s+2]  = (packed[i] >> 16) & 0xff; \
+  output[s+3]  = (packed[i] >> 24) & 0xff;
   output[0] = 0;
   output[16] = 0;
   F(0,0);
