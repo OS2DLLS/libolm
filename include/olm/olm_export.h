@@ -22,7 +22,7 @@
 #endif
 
 #ifndef OLM_DEPRECATED
-#  define OLM_DEPRECATED 
+#  define OLM_DEPRECATED __attribute__ ((__deprecated__))
 #endif
 
 #ifndef OLM_DEPRECATED_EXPORT

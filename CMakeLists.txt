@@ -1,6 +1,14 @@
-cmake_minimum_required(VERSION 3.4)
+cmake_minimum_required(VERSION 3.5)
 
 project(olm VERSION 3.2.16 LANGUAGES CXX C)
+
+# Check if we're cross-compiling for OS/2 EMX.
+if(CMAKE_SYSTEM_NAME STREQUAL "OS2" OR "$ENV{OS2EMX_TARGET}" STREQUAL "i686-pc-os2-emx")
+    set(OS2_EMX_BUILD ON)
+    set(CMAKE_SHARED_LIBRARY_PREFIX "")
+    set(CMAKE_SHARED_LIBRARY_SUFFIX ".dll")
+    set(CMAKE_EXECUTABLE_SUFFIX ".exe")
+endif()
 
 option(OLM_TESTS "Build tests" ON)
 option(BUILD_SHARED_LIBS "Build as a shared library" ON)
@@ -50,6 +58,15 @@ add_library(olm
     lib/crypto-algorithms/aes.c
     lib/crypto-algorithms/sha256.c
     lib/curve25519-donna/curve25519-donna.c)
+
+if(OS2_EMX_BUILD)
+    # OS/2 EMX uses short, unversioned DLL names.
+    set_target_properties(olm PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "olm"
+        SUFFIX ".dll"
+    )
+endif()
 add_library(Olm::Olm ALIAS olm)
 
 # restrict the exported symbols
@@ -68,6 +85,15 @@ set_target_properties(olm PROPERTIES
    SOVERSION ${PROJECT_VERSION_MAJOR}
    VERSION ${PROJECT_VERSION})
 
+if(OS2_EMX_BUILD)
+    # CMake otherwise creates Unix-style versioned DLL symlinks, which OS/2
+    # cannot use. Keep the actual library filename exactly olm.dll.
+    set_target_properties(olm PROPERTIES
+        SOVERSION ""
+        VERSION ""
+    )
+endif()
+
 set_target_properties(olm PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -85,6 +111,7 @@ set(INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/Olm)
 install(TARGETS olm
     EXPORT olm-targets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )

@@ -140,6 +140,30 @@ cmake . -Bbuild -DBUILD_SHARED_LIBS=NO
 cmake --build build
 ```
 
+To cross-compile `olm.dll` for OS/2 EMX on the configured build host, enter the
+Nix shell from `/data/shell.nix`. Its `shellHook` exports the `OS2EMX_*`
+toolchain variables, including the compiler, sysroot, build root and CMake
+toolchain-file path:
+
+```bash
+nix-shell /data/shell.nix
+
+# Configure and build using paths supplied by shell.nix
+cmake -S /data/libolm -B "$OS2EMX_BUILD_ROOT/libolm-os2" \
+  -DCMAKE_TOOLCHAIN_FILE="$OS2EMX_CMAKE_TOOLCHAIN_FILE" \
+  -DOLM_TESTS=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build "$OS2EMX_BUILD_ROOT/libolm-os2" --target olm -j2
+
+# The expected shared-library output is:
+file "$OS2EMX_BUILD_ROOT/libolm-os2/olm.dll"
+```
+
+The build directory is kept under `OS2EMX_BUILD_ROOT` (`/data/build-nix` in
+the provided shell). `OS2EMX_CC`, `OS2EMX_CXX`, `OS2EMX_SYSROOT`,
+`OS2EMX_AR`, and `OS2EMX_RANLIB` are consumed by the configured toolchain file.
+The `file` check verifies the produced artifact's format; an OS/2 runtime test
+must still be performed separately.
+
 The library can also be used as a dependency with CMake using:
 
 ```cmake
