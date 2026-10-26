@@ -128,11 +128,11 @@ void encode_one_time_key_message(
 );
 
 
-/**
- * Reads the message headers from the input buffer.
- * Populates the reader struct with pointers into the input buffer.
+/** This function is an implementation detail and isn't part of the public 
+ * API. It's used internally by the library functions, but also by some 
+ * unit tests.
  */
-void decode_one_time_key_message(
+OLM_EXPORT void decode_one_time_key_message(
     PreKeyMessageReader & reader,
     std::uint8_t const * input, std::size_t input_length
 );
