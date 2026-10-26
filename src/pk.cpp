@@ -388,19 +388,23 @@ size_t olm_pk_decrypt(
     void * ciphertext, size_t ciphertext_length,
     void * plaintext, size_t max_plaintext_length
 ) {
-    if (max_plaintext_length
-            < olm_pk_max_plaintext_length(decryption, ciphertext_length)) {
-        decryption->last_error =
-            OlmErrorCode::OLM_OUTPUT_BUFFER_TOO_SMALL;
+    if (ephemeral_key_length != olm::encode_base64_length(CURVE25519_KEY_LENGTH)
+        || mac_length != olm::encode_base64_length(MAC_LENGTH)) {
+        decryption->last_error = OlmErrorCode::OLM_INVALID_BASE64;
         return std::size_t(-1);
     }
 
     size_t raw_ciphertext_length = olm::decode_base64_length(ciphertext_length);
 
-    if (ephemeral_key_length != olm::encode_base64_length(CURVE25519_KEY_LENGTH)
-        || mac_length != olm::encode_base64_length(MAC_LENGTH)
-        || raw_ciphertext_length == std::size_t(-1)) {
+    if (raw_ciphertext_length == std::size_t(-1)) {
         decryption->last_error = OlmErrorCode::OLM_INVALID_BASE64;
+        return std::size_t(-1);
+    }
+
+    if (max_plaintext_length
+            < olm_pk_max_plaintext_length(decryption, ciphertext_length)) {
+        decryption->last_error =
+            OlmErrorCode::OLM_OUTPUT_BUFFER_TOO_SMALL;
         return std::size_t(-1);
     }
 

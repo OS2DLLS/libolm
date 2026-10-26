@@ -308,6 +308,59 @@ free(plaintext_buffer);
 
 /* Signing Test Case 1 */
 
+TEST_CASE("Public Key Decryption with invalid Base64 length") {
+    std::vector<std::uint8_t> decryption_buffer(olm_pk_decryption_size());
+    OlmPkDecryption *decryption = olm_pk_decryption(decryption_buffer.data());
+
+    std::uint8_t alice_private[32] = {
+        0x77, 0x07, 0x6D, 0x0A, 0x73, 0x18, 0xA5, 0x7D,
+        0x3C, 0x16, 0xC1, 0x72, 0x51, 0xB2, 0x66, 0x45,
+        0xDF, 0x4C, 0x2F, 0x87, 0xEB, 0xC0, 0x99, 0x2A,
+        0xB1, 0x77, 0xFB, 0xA5, 0x1D, 0xB9, 0x2C, 0x2A
+    };
+
+    std::vector<std::uint8_t> pubkey(olm_pk_key_length());
+
+    olm_pk_key_from_private(
+        decryption,
+        pubkey.data(), pubkey.size(),
+        alice_private, sizeof(alice_private)
+    );
+
+    // Use a one-character ciphertext with invalid Base64 length
+    // (length % 4 == 1) so that decode_base64_length returns size_t(-1)
+    std::uint8_t ciphertext[] = { 'x' };
+    const char *mac = "zpzU6BkZcNI";
+    const char *ephemeral_key = "3p7bfXt9wbTTW2HC7OQ1Nz+DQ8hbeGdNrfx+FG+IK08";
+
+    // Pre-fill output buffer with sentinel value
+    std::uint8_t plaintext[16];
+    for (size_t i = 0; i < sizeof(plaintext); ++i) {
+        plaintext[i] = 0xAA;
+    }
+
+    size_t result = olm_pk_decrypt(
+        decryption,
+        ephemeral_key, strlen(ephemeral_key),
+        mac, strlen(mac),
+        ciphertext, sizeof(ciphertext),
+        plaintext, sizeof(plaintext)
+    );
+
+    // Should fail with OLM_INVALID_BASE64 error
+    CHECK_EQ(std::size_t(-1), result);
+    CHECK_EQ(OLM_INVALID_BASE64, olm_pk_decryption_last_error_code(decryption));
+
+    // The output buffer should remain unchanged
+    for (size_t i = 0; i < sizeof(plaintext); ++i) {
+        CHECK_EQ(0xAA, plaintext[i]);
+    }
+
+    // The input ciphertext should also remain unchanged.
+    // (the test is about the error occurring before it's processed)
+    CHECK_EQ('x', ciphertext[0]);
+}
+
 TEST_CASE("Public Key Signing") {
 
 std::vector<std::uint8_t> signing_buffer(olm_pk_signing_size());

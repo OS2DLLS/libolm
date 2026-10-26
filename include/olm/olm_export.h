@@ -9,15 +9,15 @@
 #  ifndef OLM_EXPORT
 #    ifdef olm_EXPORTS
         /* We are building this library */
-#      define OLM_EXPORT 
+#      define OLM_EXPORT __attribute__((visibility("default")))
 #    else
         /* We are using this library */
-#      define OLM_EXPORT 
+#      define OLM_EXPORT __attribute__((visibility("default")))
 #    endif
 #  endif
 
 #  ifndef OLM_NO_EXPORT
-#    define OLM_NO_EXPORT 
+#    define OLM_NO_EXPORT __attribute__((visibility("hidden")))
 #  endif
 #endif
 

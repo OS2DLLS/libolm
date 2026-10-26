@@ -141,9 +141,9 @@ TEST_CASE("Session describe ignores lengths larger than INT_MAX") {
     session.ratchet.sender_chain.insert()->chain_key.index = 0;
 
     if (std::numeric_limits<std::size_t>::max() >
-        std::numeric_limits<unsigned int>::max()) {
+        static_cast<std::size_t>(std::numeric_limits<int>::max())) {
         const std::size_t oversized_length =
-            static_cast<std::size_t>(std::numeric_limits<unsigned int>::max()) + 24;
+            static_cast<std::size_t>(std::numeric_limits<int>::max()) + 1;
         char buffer[64];
         for (char &character : buffer) character = 'x';
 

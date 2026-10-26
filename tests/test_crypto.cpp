@@ -15,6 +15,7 @@
 #include "olm/crypto.h"
 
 #include "testing.hh"
+#include <cstring>
 
 
 /* Curve25529 Test Case 1 */
@@ -79,6 +80,55 @@ _olm_crypto_curve25519_shared_secret(&bob_pair, &alice_pair.public_key, actual_a
 CHECK_EQ_SIZE(expected_agreement, actual_agreement, 32);
 
 } /* Curve25529 Test Case 1 */
+
+
+TEST_CASE("Curve25519 rejects low-order public keys") {
+    // LowOrderPublic inputs from C2SP/Wycheproof's X25519 test vectors.
+    static const std::uint8_t low_order_u_coordinates[][CURVE25519_KEY_LENGTH] = {
+        { 0x00 },
+        { 0x01 },
+        { 0xe0, 0xeb, 0x7a, 0x7c, 0x3b, 0x41, 0xb8, 0xae,
+          0x16, 0x56, 0xe3, 0xfa, 0xf1, 0x9f, 0xc4, 0x6a,
+          0xda, 0x09, 0x8d, 0xeb, 0x9c, 0x32, 0xb1, 0xfd,
+          0x86, 0x62, 0x05, 0x16, 0x5f, 0x49, 0xb8, 0x00 },
+        { 0x5f, 0x9c, 0x95, 0xbc, 0xa3, 0x50, 0x8c, 0x24,
+          0xb1, 0xd0, 0xb1, 0x55, 0x9c, 0x83, 0xef, 0x5b,
+          0x04, 0x44, 0x5c, 0xc4, 0x58, 0x1c, 0x8e, 0x86,
+          0xd8, 0x22, 0x4e, 0xdd, 0xd0, 0x9f, 0x11, 0x57 },
+        { 0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
+        { 0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
+        { 0xee, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f }
+    };
+    std::uint8_t private_key[CURVE25519_KEY_LENGTH] = { 8 };
+    _olm_curve25519_key_pair our_key;
+    _olm_crypto_curve25519_generate_key(private_key, &our_key);
+    std::uint8_t zero_secret[CURVE25519_SHARED_SECRET_LENGTH] = {};
+
+    for (std::size_t i = 0; i < sizeof(low_order_u_coordinates) / sizeof(low_order_u_coordinates[0]); ++i) {
+        for (unsigned top_bit = 0; top_bit < 2; ++top_bit) {
+            _olm_curve25519_public_key their_key;
+            std::memcpy(their_key.public_key, low_order_u_coordinates[i], CURVE25519_KEY_LENGTH);
+            if (top_bit) {
+                their_key.public_key[CURVE25519_KEY_LENGTH - 1] |= 0x80;
+            }
+
+            CHECK_EQ(0, _olm_crypto_curve25519_public_key_is_valid(&their_key));
+            std::uint8_t shared_secret[CURVE25519_SHARED_SECRET_LENGTH];
+            std::memset(shared_secret, 0xa5, sizeof(shared_secret));
+            CHECK_EQ(0, _olm_crypto_curve25519_shared_secret(&our_key, &their_key, shared_secret));
+            CHECK_EQ_SIZE(zero_secret, shared_secret, sizeof(shared_secret));
+        }
+    }
+}
 
 
 TEST_CASE("Ed25519 Signature Test Case 1") {
@@ -262,4 +312,69 @@ _olm_crypto_hkdf_sha256(
 CHECK_EQ_SIZE(hkdf_expected_output, hkdf_actual_output, 42);
 
 } /* HDKF Test Case 1 */
+
+
+TEST_CASE("AES CBC decryption rejects zero PKCS#7 padding") {
+    _olm_aes256_key key = {};
+    _olm_aes256_iv iv = {};
+    std::uint8_t empty_input[1] = {};
+    std::uint8_t ciphertext[AES256_IV_LENGTH] = {};
+    _olm_crypto_aes_encrypt_cbc(&key, &iv, empty_input, 0, ciphertext);
+
+    // A valid empty-message block decrypts to sixteen 0x10 bytes. Change the IV
+    // so its final byte is 0x00, which is not a valid PKCS#7 padding length.
+    _olm_aes256_iv malformed_iv = iv;
+    malformed_iv.iv[AES256_IV_LENGTH - 1] ^= AES256_IV_LENGTH;
+    std::uint8_t output[AES256_IV_LENGTH];
+    std::memset(output, 0xA5, sizeof(output));
+    std::uint8_t zero_output[AES256_IV_LENGTH] = {};
+
+    std::size_t result = _olm_crypto_aes_decrypt_cbc(
+        &key, &malformed_iv, ciphertext, sizeof(ciphertext), output
+    );
+    CHECK_EQ(std::size_t(-1), result);
+    CHECK_EQ_SIZE(zero_output, output, sizeof(output));
+}
+
+TEST_CASE("AES CBC decryption rejects padding longer than one block") {
+    _olm_aes256_key key = {};
+    _olm_aes256_iv iv = {};
+    std::uint8_t plaintext[AES256_IV_LENGTH] = {};
+    std::uint8_t ciphertext[AES256_IV_LENGTH * 2] = {};
+    _olm_crypto_aes_encrypt_cbc(&key, &iv, plaintext, sizeof(plaintext), ciphertext);
+
+    // CBC XORs the prior ciphertext block into the final plaintext block.
+    // Flipping this bit changes the final 0x10 padding byte to 0x11 (17).
+    ciphertext[AES256_IV_LENGTH - 1] ^= 1;
+    std::uint8_t output[AES256_IV_LENGTH * 2];
+    std::memset(output, 0xA5, sizeof(output));
+    std::uint8_t zero_output[AES256_IV_LENGTH * 2] = {};
+
+    std::size_t result = _olm_crypto_aes_decrypt_cbc(
+        &key, &iv, ciphertext, sizeof(ciphertext), output
+    );
+    CHECK_EQ(std::size_t(-1), result);
+    CHECK_EQ_SIZE(zero_output, output, sizeof(output));
+}
+
+TEST_CASE("AES CBC decryption rejects inconsistent PKCS#7 padding bytes") {
+    _olm_aes256_key key = {};
+    _olm_aes256_iv iv = {};
+    std::uint8_t empty_input[1] = {};
+    std::uint8_t ciphertext[AES256_IV_LENGTH] = {};
+    _olm_crypto_aes_encrypt_cbc(&key, &iv, empty_input, 0, ciphertext);
+
+    // Keep the final padding byte at 0x10, but make the preceding byte differ.
+    _olm_aes256_iv malformed_iv = iv;
+    malformed_iv.iv[AES256_IV_LENGTH - 2] ^= 1;
+    std::uint8_t output[AES256_IV_LENGTH];
+    std::memset(output, 0xA5, sizeof(output));
+    std::uint8_t zero_output[AES256_IV_LENGTH] = {};
+
+    std::size_t result = _olm_crypto_aes_decrypt_cbc(
+        &key, &malformed_iv, ciphertext, sizeof(ciphertext), output
+    );
+    CHECK_EQ(std::size_t(-1), result);
+    CHECK_EQ_SIZE(zero_output, output, sizeof(output));
+}
 

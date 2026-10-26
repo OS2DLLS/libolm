@@ -253,7 +253,22 @@ std::size_t _olm_crypto_aes_decrypt_cbc(
     olm::unset(block1);
     olm::unset(block2);
     std::size_t padding = output[input_length - 1];
-    return (padding > input_length) ? std::size_t(-1) : (input_length - padding);
+    if (padding == 0 || padding > AES_BLOCK_LENGTH) {
+        olm::unset(output, input_length);
+        return std::size_t(-1);
+    }
+
+    std::uint8_t padding_difference = 0;
+    for (std::size_t i = 0; i < padding; ++i) {
+        padding_difference |= output[input_length - 1 - i]
+            ^ static_cast<std::uint8_t>(padding);
+    }
+    if (padding_difference != 0) {
+        olm::unset(output, input_length);
+        return std::size_t(-1);
+    }
+
+    return input_length - padding;
 }
 
 
